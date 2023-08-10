@@ -20,11 +20,11 @@
     <parent>
         <artifactId>legend-depot</artifactId>
         <groupId>org.finos.legend.depot</groupId>
-        <version>1.24.1-SNAPSHOT</version>
+        <version>1.25.1-SNAPSHOT</version>
     </parent>
     <modelVersion>4.0.0</modelVersion>
 
-    <name>Legend Depot - Servers Common</name>
+    <name>Legend Depot - Servers - Common</name>
     <artifactId>legend-depot-servers-common</artifactId>
 
     <dependencies>

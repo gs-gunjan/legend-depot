@@ -20,11 +20,11 @@
     <parent>
         <artifactId>legend-depot</artifactId>
         <groupId>org.finos.legend.depot</groupId>
-        <version>1.24.1-SNAPSHOT</version>
+        <version>1.25.1-SNAPSHOT</version>
     </parent>
     <modelVersion>4.0.0</modelVersion>
 
-    <name>Legend Depot - Core - HTTP Server</name>
+    <name>Legend Depot - Core - HTTP Components</name>
     <artifactId>legend-depot-core-http</artifactId>
 
     <dependencies>
