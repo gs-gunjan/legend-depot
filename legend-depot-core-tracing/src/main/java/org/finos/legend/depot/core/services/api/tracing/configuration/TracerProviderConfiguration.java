@@ -17,11 +17,10 @@ package org.finos.legend.depot.core.services.api.tracing.configuration;
 
 import com.fasterxml.jackson.annotation.JsonTypeInfo;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import org.finos.legend.opentracing.AuthenticationProvider;
 
-public abstract class TracingAuthenticationProviderConfiguration
+public abstract class TracerProviderConfiguration
 {
-    private TracingAuthenticationProviderConfiguration()
+    private TracerProviderConfiguration()
     {
     }
 
@@ -33,7 +32,7 @@ public abstract class TracingAuthenticationProviderConfiguration
         }
 
         return objectMapper
-                .addMixIn(AuthenticationProvider.class, WrapperMixin.class);
+                .addMixIn(TracerProvider.class, WrapperMixin.class);
     }
 
 }

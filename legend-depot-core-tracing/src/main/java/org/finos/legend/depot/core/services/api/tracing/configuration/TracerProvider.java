@@ -13,17 +13,12 @@
 //  limitations under the License.
 //
 
-package org.finos.legend.depot.core.services.api.tracing;
+package org.finos.legend.depot.core.services.api.tracing.configuration;
 
-public class TracingException extends RuntimeException
+import io.opentracing.Tracer;
+import zipkin2.reporter.Sender;
+
+public interface TracerProvider
 {
-    public TracingException(String message, Exception e)
-    {
-        super(message, e);
-    }
-
-    public TracingException(String message)
-    {
-        super(message);
-    }
+    Tracer create(OpenTracingConfiguration configuration);
 }
