@@ -26,19 +26,20 @@ import org.finos.legend.depot.server.resources.guice.EntitiesResourcesModule;
 import org.finos.legend.depot.server.resources.guice.GenerationsResourcesModule;
 import org.finos.legend.depot.server.resources.guice.PureModelContextResourcesModule;
 import org.finos.legend.depot.services.guice.EntitiesServicesModule;
+import org.finos.legend.depot.services.guice.VersionedEntitiesServicesModule;
 import org.finos.legend.depot.services.pure.model.context.guice.PureModelContextModule;
 import org.finos.legend.depot.services.guice.CoreDataServicesModule;
 import org.finos.legend.depot.services.guice.SchedulesModule;
 import org.finos.legend.depot.services.guice.GenerationsServicesModule;
 import org.finos.legend.depot.services.guice.QueryMetricsModule;
 import org.finos.legend.depot.services.guice.QueryMetricsSchedulesModule;
+import org.finos.legend.depot.store.mongo.guice.NotificationsQueueMongoModule;
 import org.finos.legend.depot.store.mongo.guice.QueryMetricsMongoStoreModule;
 import org.finos.legend.depot.store.mongo.guice.SchedulesStoreMongoModule;
 import org.finos.legend.depot.store.mongo.core.MongoClientModule;
 import org.finos.legend.depot.store.mongo.guice.CoreDataStoreMongoModule;
 import org.finos.legend.depot.store.mongo.guice.EntitiesStoreMongoModule;
 import org.finos.legend.depot.store.mongo.guice.GenerationsStoreMongoModule;
-import org.finos.legend.depot.store.notifications.queue.NotificationsQueueModule;
 import org.finos.legend.depot.core.services.guice.MonitoringModule;
 
 import java.util.Arrays;
@@ -68,6 +69,7 @@ public class LegendDepotServer extends BaseServer<DepotServerConfiguration>
 
                 new EntitiesResourcesModule(),
                 new EntitiesServicesModule(),
+                new VersionedEntitiesServicesModule(),
                 new EntitiesStoreMongoModule(),
 
                 new GenerationsResourcesModule(),
@@ -76,7 +78,7 @@ public class LegendDepotServer extends BaseServer<DepotServerConfiguration>
 
                 new MongoClientModule(),
 
-                new NotificationsQueueModule(),
+                new NotificationsQueueMongoModule(),
 
                 new PureModelContextResourcesModule(),
                 new PureModelContextModule(),

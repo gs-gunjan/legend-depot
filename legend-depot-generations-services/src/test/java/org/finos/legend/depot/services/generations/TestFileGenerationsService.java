@@ -24,7 +24,6 @@ import org.finos.legend.depot.services.generations.impl.ManageFileGenerationsSer
 import org.finos.legend.depot.services.generations.loader.FileGenerationLoader;
 import org.finos.legend.depot.services.projects.ProjectsServiceImpl;
 import org.finos.legend.depot.services.api.projects.configuration.ProjectsConfiguration;
-import org.finos.legend.depot.store.api.entities.Entities;
 import org.finos.legend.depot.store.api.generations.UpdateFileGenerations;
 import org.finos.legend.depot.store.api.projects.UpdateProjects;
 import org.finos.legend.depot.store.api.projects.UpdateProjectsVersions;
@@ -32,7 +31,7 @@ import org.finos.legend.depot.services.api.metrics.query.QueryMetricsRegistry;
 import org.finos.legend.depot.store.model.generations.StoredFileGeneration;
 import org.finos.legend.depot.store.mongo.TestStoreMongo;
 import org.finos.legend.depot.store.mongo.generations.FileGenerationsMongo;
-import org.finos.legend.depot.store.notifications.queue.api.Queue;
+import org.finos.legend.depot.services.api.notifications.queue.Queue;
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
@@ -54,14 +53,13 @@ public class TestFileGenerationsService extends TestStoreMongo
 
     public static final String AVRO = "avro";
     private static final URL filePath = TestFileGenerationsService.class.getClassLoader().getResource("generations/test-file-generation-master-SNAPSHOT.jar");
-    protected Entities entities = mock(Entities.class);
     private UpdateFileGenerations generations = new FileGenerationsMongo(mongoProvider);
     UpdateProjectsVersions projectsVersionsStore = mock(UpdateProjectsVersions.class);
     UpdateProjects projectsStore = mock(UpdateProjects.class);
     private final QueryMetricsRegistry metrics = mock(QueryMetricsRegistry.class);
     private final Queue queue = mock(Queue.class);
     private ProjectsService projectsService = new ProjectsServiceImpl(projectsVersionsStore, projectsStore, metrics, queue, new ProjectsConfiguration("master"));
-    private ManageFileGenerationsService service = new ManageFileGenerationsServiceImpl(generations, entities, projectsService);
+    private ManageFileGenerationsService service = new ManageFileGenerationsServiceImpl(generations, projectsService);
 
     @Before
     public void loadData() throws Exception
@@ -93,7 +91,7 @@ public class TestFileGenerationsService extends TestStoreMongo
             Assert.assertEquals(54, generations.getAll().size());
         }
 
-        when(projectsStore.find("group.test","test")).thenReturn(Optional.of(new StoreProjectData("prod-1","group.test","test")));
+        when(projectsStore.find("group.test","test")).thenReturn(Optional.of(new StoreProjectData("prod-1","group.test","test",null,"1.0.0")));
         when(projectsStore.find("group.test.otherproject", "test")).thenReturn(Optional.of(new StoreProjectData("prod-2","group.test.otherproject", "test")));
         when(projectsVersionsStore.find("group.test","test",BRANCH_SNAPSHOT("master"))).thenReturn(Optional.of(new StoreProjectVersionData("group-test","test",BRANCH_SNAPSHOT("master"))));
         when(projectsVersionsStore.find("group.test","test","1.0.0")).thenReturn(Optional.of(new StoreProjectVersionData("group-test","test","1.0.0")));

@@ -15,27 +15,26 @@
 
 package org.finos.legend.depot.services.entities;
 
-import org.eclipse.collections.impl.utility.ListIterate;
 import org.finos.legend.depot.domain.entity.DepotEntity;
+import org.finos.legend.depot.domain.entity.DepotEntityOverview;
 import org.finos.legend.depot.domain.project.ProjectVersion;
 import org.finos.legend.depot.domain.version.Scope;
 import org.finos.legend.depot.services.api.entities.EntityClassifierService;
 import org.finos.legend.depot.services.api.projects.ProjectsService;
 import org.finos.legend.depot.store.api.entities.Entities;
-import org.finos.legend.sdlc.domain.model.version.VersionId;
-import org.slf4j.Logger;
+import org.finos.legend.depot.store.model.projects.StoreProjectData;
 
 import javax.inject.Inject;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
-import java.util.Optional;
 import java.util.stream.Collectors;
 
 public class EntityClassifierServiceImpl implements EntityClassifierService
 {
-    private static final Logger LOGGER = org.slf4j.LoggerFactory.getLogger(EntityClassifierServiceImpl.class);
     private final Entities entities;
     private final ProjectsService projects;
+    private static final int PAGE_SIZE = 100;
 
     @Inject
     public EntityClassifierServiceImpl(ProjectsService projects, Entities versions)
@@ -44,36 +43,45 @@ public class EntityClassifierServiceImpl implements EntityClassifierService
         this.entities = versions;
     }
 
-    private List<ProjectVersion> getProjectsInfo(int page, int pageSize)
+    private List<ProjectVersion> getLatestProjectVersionByPage(int page, int pageSize, List<StoreProjectData> allProjects)
     {
-        return ListIterate.collect(projects.getProjects(page, pageSize), projectData ->
+        int beginIndex = page * pageSize - pageSize;
+        int lastIndex = page * pageSize - 1;
+        if (beginIndex >= allProjects.size() || beginIndex < 0)
         {
-            Optional<VersionId> latestVersion = projects.getLatestVersion(projectData.getGroupId(), projectData.getArtifactId());
-            return new ProjectVersion(projectData.getGroupId(), projectData.getArtifactId(), latestVersion.isPresent() ? latestVersion.get().toVersionIdString() : null);
-        }).select(info -> info.getVersionId() != null);
+            return Collections.emptyList();
+        }
+        else if (lastIndex >= allProjects.size())
+        {
+            lastIndex = allProjects.size() - 1;
+        }
+        return allProjects.subList(beginIndex, lastIndex).stream()
+                .filter(project -> project.getLatestVersion() != null)
+                .map(project -> new ProjectVersion(project.getGroupId(), project.getArtifactId(), project.getLatestVersion()))
+                .collect(Collectors.toList());
     }
 
     @Override
-    public List<DepotEntity> getEntitiesByClassifierPath(String classifierPath, String search, Integer limit, Scope scope, boolean summary)
+    public List<DepotEntity> getEntitiesByClassifierPath(String classifierPath, String search, Integer limit, Scope scope, boolean latestVersion)
     {
         if (Scope.SNAPSHOT.equals(scope))
         {
-            return this.findLatestEntitiesByClassifier(classifierPath, search, limit, summary);
+            return this.findClassifierEntities(classifierPath, scope, search, limit);
         }
         List<DepotEntity> result = new ArrayList<>();
-        int PAGE_SIZE = 100;
         int currentPage = 1;
-        List<ProjectVersion> projectVersions = this.getProjectsInfo(currentPage, PAGE_SIZE);
+        List<StoreProjectData> allProjects = projects.getAllProjectCoordinates();
+        List<ProjectVersion> projectVersions = this.getLatestProjectVersionByPage(currentPage, PAGE_SIZE, allProjects);
         while (!projectVersions.isEmpty())
         {
-            List<DepotEntity> entities = this.findReleasedEntitiesByClassifier(classifierPath, search, projectVersions, limit, summary);
+            List<DepotEntity> entities = this.findClassifierEntitiesByVersions(classifierPath, projectVersions, search, limit);
             result.addAll(entities);
             if (limit != null && result.size() >= limit)
             {
                 break;
             }
             currentPage++;
-            projectVersions = this.getProjectsInfo(currentPage, PAGE_SIZE);
+            projectVersions = this.getLatestProjectVersionByPage(currentPage, PAGE_SIZE, allProjects);
         }
         if (limit != null)
         {
@@ -83,26 +91,50 @@ public class EntityClassifierServiceImpl implements EntityClassifierService
     }
 
     @Override
-    public List<DepotEntity> findReleasedEntitiesByClassifier(String classifier, String search, List<ProjectVersion> projectVersions, Integer limit, boolean summary)
+    public List<DepotEntity> findClassifierEntities(String classifier, Scope scope)
     {
-        return entities.findReleasedEntitiesByClassifier(classifier, search, projectVersions, limit, summary);
+        if (scope.equals(Scope.SNAPSHOT))
+        {
+            return entities.findLatestClassifierEntities(classifier);
+        }
+        return entities.findReleasedClassifierEntities(classifier);
     }
 
     @Override
-    public List<DepotEntity> findLatestEntitiesByClassifier(String classifier, String search, Integer limit, boolean summary)
+    public List<DepotEntity> findClassifierEntitiesByVersions(String classifier, List<ProjectVersion> projectVersions)
     {
-        return entities.findLatestEntitiesByClassifier(classifier, search, limit, summary);
+        return entities.findClassifierEntitiesByVersions(classifier, projectVersions);
     }
 
     @Override
-    public List<DepotEntity> findReleasedEntitiesByClassifier(String classifier, boolean summary)
+    public List<DepotEntityOverview> findClassifierSummaries(String classifier, Scope scope)
     {
-        return entities.findReleasedEntitiesByClassifier(classifier, summary);
+        if (scope.equals(Scope.SNAPSHOT))
+        {
+            return entities.findLatestClassifierSummaries(classifier);
+        }
+        return entities.findReleasedClassifierSummaries(classifier);
     }
 
     @Override
-    public List<DepotEntity> findLatestEntitiesByClassifier(String classifier, boolean summary)
+    public List<DepotEntityOverview> findClassifierSummariesByVersions(String classifier, List<ProjectVersion> projectVersions)
     {
-        return entities.findLatestEntitiesByClassifier(classifier, summary);
+        return entities.findClassifierSummariesByVersions(classifier, projectVersions);
+    }
+
+    @Override
+    public List<DepotEntity> findClassifierEntities(String classifier, Scope scope, String search, Integer limit)
+    {
+        if (scope.equals(Scope.SNAPSHOT))
+        {
+            return entities.findLatestClassifierEntities(classifier, search, limit);
+        }
+        return entities.findReleasedClassifierEntities(classifier, search, limit);
+    }
+
+    @Override
+    public List<DepotEntity> findClassifierEntitiesByVersions(String classifier, List<ProjectVersion> projectVersions, String search, Integer limit)
+    {
+        return entities.findClassifierEntitiesByVersions(classifier, projectVersions, search, limit);
     }
 }

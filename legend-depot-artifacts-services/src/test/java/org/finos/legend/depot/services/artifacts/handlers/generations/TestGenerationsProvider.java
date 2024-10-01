@@ -18,8 +18,9 @@ package org.finos.legend.depot.services.artifacts.handlers.generations;
 import org.finos.legend.depot.services.api.artifacts.repository.ArtifactRepository;
 import org.finos.legend.depot.domain.artifacts.repository.ArtifactType;
 import org.finos.legend.depot.services.artifacts.repository.maven.TestMavenArtifactsRepository;
-import org.finos.legend.depot.domain.api.MetadataEventResponse;
+import org.finos.legend.depot.domain.notifications.MetadataNotificationResponse;
 import org.finos.legend.depot.domain.generation.DepotGeneration;
+import org.finos.legend.depot.store.model.entities.EntityDefinition;
 import org.finos.legend.depot.store.model.generations.StoredFileGeneration;
 import org.finos.legend.depot.store.model.projects.StoreProjectData;
 import org.finos.legend.depot.store.model.projects.StoreProjectVersionData;
@@ -34,19 +35,24 @@ import org.finos.legend.depot.services.api.artifacts.handlers.generations.FileGe
 import org.finos.legend.depot.services.api.metrics.query.QueryMetricsRegistry;
 import org.finos.legend.depot.store.mongo.TestStoreMongo;
 import org.finos.legend.depot.store.mongo.generations.FileGenerationsMongo;
-import org.finos.legend.depot.store.notifications.queue.api.Queue;
+import org.finos.legend.depot.services.api.notifications.queue.Queue;
+import org.finos.legend.sdlc.domain.model.entity.Entity;
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
 
 import java.io.File;
 import java.net.URL;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
 
 import static org.finos.legend.depot.domain.version.VersionValidator.BRANCH_SNAPSHOT;
+import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.when;
 
 
@@ -63,7 +69,9 @@ public class TestGenerationsProvider extends TestStoreMongo
     private final UpdateEntities entities = mock(UpdateEntities.class);
     private final QueryMetricsRegistry metrics = mock(QueryMetricsRegistry.class);
     private final Queue queue = mock(Queue.class);
-    private final ManageFileGenerationsService generations = new ManageFileGenerationsServiceImpl(new FileGenerationsMongo(mongoProvider), entities, new ProjectsServiceImpl(projectsVersions,projects,metrics,queue,new ProjectsConfiguration("master")));
+    private final FileGenerationsArtifactsProvider provider = mock(FileGenerationsArtifactsProvider.class);
+    private final ManageFileGenerationsService generations = new ManageFileGenerationsServiceImpl(new FileGenerationsMongo(mongoProvider), new ProjectsServiceImpl(projectsVersions,projects,metrics,queue,new ProjectsConfiguration("master")));
+    private final FileGenerationHandlerImpl handler = spy(new FileGenerationHandlerImpl(repository, provider, generations));
 
     @Before
     public void setup()
@@ -104,7 +112,7 @@ public class TestGenerationsProvider extends TestStoreMongo
         Assert.assertTrue(generations.getAll().isEmpty());
         FileGenerationHandlerImpl handler = new FileGenerationHandlerImpl(repository, fileGenerationsProvider, generations);
         StoreProjectData projectData = projects.find(TEST_GROUP_ID, TEST_ARTIFACT_ID).get();
-        MetadataEventResponse response = handler.refreshProjectVersionArtifacts(projectData.getGroupId(),projectData.getArtifactId(), BRANCH_SNAPSHOT("master"), getFiles(BRANCH_SNAPSHOT("master")));
+        MetadataNotificationResponse response = handler.refreshProjectVersionArtifacts(projectData.getGroupId(),projectData.getArtifactId(), BRANCH_SNAPSHOT("master"), getFiles(BRANCH_SNAPSHOT("master")));
         Assert.assertNotNull(response);
         Assert.assertFalse(response.hasErrors());
         List<StoredFileGeneration> fileGenerations = generations.getAll();
@@ -121,12 +129,38 @@ public class TestGenerationsProvider extends TestStoreMongo
         FileGenerationHandlerImpl handler = new FileGenerationHandlerImpl(repository, fileGenerationsProvider, generations);
         StoreProjectData projectData = projects.find(TEST_GROUP_ID, TEST_ARTIFACT_ID).get();
         //deleted one generation as part of new master snapshot version
-        MetadataEventResponse response = handler.refreshProjectVersionArtifacts(projectData.getGroupId(),projectData.getArtifactId(), BRANCH_SNAPSHOT("master"),Arrays.asList(new File(filePath.getFile())));
+        MetadataNotificationResponse response = handler.refreshProjectVersionArtifacts(projectData.getGroupId(),projectData.getArtifactId(), BRANCH_SNAPSHOT("master"),Arrays.asList(new File(filePath.getFile())));
         Assert.assertNotNull(response);
         Assert.assertFalse(response.hasErrors());
         List<StoredFileGeneration> fileGenerations = generations.getAll();
         Assert.assertNotNull(fileGenerations);
         Assert.assertEquals(13, fileGenerations.size());
+    }
+
+    @Test
+    public void canGetTheRightElementPathFromGeneratedFile()
+    {
+
+        Assert.assertTrue(generations.getAll().isEmpty());
+        List<Entity> projectEntities = new ArrayList<>(Arrays.asList(new EntityDefinition("examples::metadata::snowFlakeApp", "", Collections.emptyMap()), new EntityDefinition("examples::metadata::snowFlakeApp2", "", Collections.emptyMap())));
+        List<DepotGeneration> generatedFiles = new ArrayList<>(Arrays.asList(new DepotGeneration("/examples/metadata/snowFlakeApp/searchDocuments/SearchDocumentResult.json", ""), new DepotGeneration("/examples/metadata/snowFlakeApp2/searchDocuments/SearchDocumentResult.json", "")));
+        StoreProjectData projectData = projects.find(TEST_GROUP_ID, TEST_ARTIFACT_ID).get();
+        List<File> files = getFiles("2.0.0");
+        when(this.provider.extractArtifacts(files)).thenReturn(generatedFiles);
+        doReturn(projectEntities).when(this.handler).getAllNonVersionedEntities(projectData.getGroupId(), projectData.getArtifactId(), "2.0.0");
+        MetadataNotificationResponse response = this.handler.refreshProjectVersionArtifacts(projectData.getGroupId(),projectData.getArtifactId(), "2.0.0", files);
+
+        Assert.assertNotNull(response);
+        Assert.assertFalse(response.hasErrors());
+        List<StoredFileGeneration> fileGenerations = generations.getAll();
+        Assert.assertNotNull(fileGenerations);
+        Assert.assertEquals(2, fileGenerations.size());
+        Assert.assertEquals(1, fileGenerations.stream().filter(f -> f.getPath().equals("examples::metadata::snowFlakeApp")).count());
+        Assert.assertEquals(1, fileGenerations.stream().filter(f -> f.getPath().equals("examples::metadata::snowFlakeApp2")).count());
+        StoredFileGeneration storedFileGeneration = fileGenerations.stream().filter(f -> f.getPath().equals("examples::metadata::snowFlakeApp")).findFirst().get();
+        StoredFileGeneration storedFileGeneration2 = fileGenerations.stream().filter(f -> f.getPath().equals("examples::metadata::snowFlakeApp2")).findFirst().get();
+        Assert.assertEquals(generatedFiles.get(0).getPath(), storedFileGeneration.getFile().getPath());
+        Assert.assertEquals(generatedFiles.get(1).getPath(), storedFileGeneration2.getFile().getPath());
     }
 
     @Test
@@ -136,7 +170,7 @@ public class TestGenerationsProvider extends TestStoreMongo
         Assert.assertTrue(generations.getAll().isEmpty());
         FileGenerationHandlerImpl handler = new FileGenerationHandlerImpl(repository, fileGenerationsProvider, generations);
         StoreProjectData projectData = projects.find(TEST_GROUP_ID, TEST_ARTIFACT_ID).get();
-        MetadataEventResponse response = handler.refreshProjectVersionArtifacts(projectData.getGroupId(),projectData.getArtifactId(), "2.0.0", getFiles("2.0.0"));
+        MetadataNotificationResponse response = handler.refreshProjectVersionArtifacts(projectData.getGroupId(),projectData.getArtifactId(), "2.0.0", getFiles("2.0.0"));
         Assert.assertNotNull(response);
         Assert.assertFalse(response.hasErrors());
         List<StoredFileGeneration> fileGenerations = generations.getAll();
@@ -152,7 +186,7 @@ public class TestGenerationsProvider extends TestStoreMongo
         Assert.assertTrue(generations.getAll().isEmpty());
         FileGenerationHandlerImpl handler = new FileGenerationHandlerImpl(repository, fileGenerationsProvider, generations);
         StoreProjectData projectData = projects.find(TEST_GROUP_ID, TEST_ARTIFACT_ID).get();
-        MetadataEventResponse response = handler.refreshProjectVersionArtifacts(projectData.getGroupId(),projectData.getArtifactId(), "2.0.0", getFiles("2.0.0"));
+        MetadataNotificationResponse response = handler.refreshProjectVersionArtifacts(projectData.getGroupId(),projectData.getArtifactId(), "2.0.0", getFiles("2.0.0"));
         Assert.assertNotNull(response);
 
         Assert.assertFalse(response.hasErrors());

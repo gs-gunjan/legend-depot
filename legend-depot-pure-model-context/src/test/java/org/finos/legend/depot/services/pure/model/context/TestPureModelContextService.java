@@ -37,7 +37,7 @@ import org.finos.legend.depot.store.mongo.entities.test.EntitiesMongoTestUtils;
 import org.finos.legend.depot.services.api.projects.configuration.ProjectsConfiguration;
 import org.finos.legend.depot.store.mongo.entities.EntitiesMongo;
 import org.finos.legend.depot.store.mongo.metrics.query.QueryMetricsMongo;
-import org.finos.legend.depot.store.notifications.queue.api.Queue;
+import org.finos.legend.depot.services.api.notifications.queue.Queue;
 import org.finos.legend.engine.protocol.pure.v1.model.context.AlloySDLC;
 import org.finos.legend.engine.protocol.pure.v1.model.context.PureModelContextData;
 import org.finos.legend.engine.shared.core.ObjectMapperFactory;
@@ -100,7 +100,7 @@ public class TestPureModelContextService extends TestBaseServices
     @Before
     public void setupMetadata()
     {
-        projectsStore.createOrUpdate(new StoreProjectData("PROD-1","test.legend","blank-prod"));
+        projectsStore.createOrUpdate(new StoreProjectData("PROD-1","test.legend","blank-prod",null, "2.0.0"));
         setUpProjectsVersionsFromFile(projects);
         Assert.assertEquals(4, projectsService.getAllProjectCoordinates().size());
         entityUtils.loadEntities(versionedEntities);
@@ -196,7 +196,7 @@ public class TestPureModelContextService extends TestBaseServices
     {
         getPureModelContextDataAsString("examples.metadata", "test", "2.3.1", CLIENT_VERSION,  true);
         metricsHandler.persist(metricsRegistry);
-        Assert.assertEquals(metrics.getAll().size(), 5);
+        Assert.assertEquals(metrics.getAll().size(), 4);
         Assert.assertNotNull(metrics.get("examples.metadata", "test-dependencies", "1.0.0").get(0).getLastQueryTime());
         Assert.assertNotNull(metrics.get("examples.metadata", "test", "2.3.1").get(0).getLastQueryTime());
     }

@@ -18,15 +18,15 @@ package org.finos.legend.depot.services.artifacts.refresh;
 import com.google.inject.name.Named;
 import org.apache.commons.codec.digest.DigestUtils;
 import org.apache.maven.model.Model;
-import org.eclipse.collections.impl.parallel.ParallelIterate;
 import org.finos.legend.depot.domain.CoordinateValidator;
-import org.finos.legend.depot.domain.api.MetadataEventResponse;
+import org.finos.legend.depot.domain.notifications.MetadataNotificationResponse;
 import org.finos.legend.depot.domain.notifications.MetadataNotification;
 import org.finos.legend.depot.domain.project.ProjectVersion;
 import org.finos.legend.depot.domain.project.ProjectVersionData;
 import org.finos.legend.depot.domain.project.Property;
 import org.finos.legend.depot.domain.version.VersionValidator;
 import org.finos.legend.depot.services.api.artifacts.refresh.RefreshDependenciesService;
+import org.finos.legend.depot.services.api.notifications.NotificationHandler;
 import org.finos.legend.depot.services.api.projects.ManageProjectsService;
 import org.finos.legend.depot.services.artifacts.handlers.ManifestLoader;
 import org.finos.legend.depot.store.api.admin.artifacts.ArtifactsFilesStore;
@@ -37,8 +37,7 @@ import org.finos.legend.depot.services.api.artifacts.repository.ArtifactReposito
 import org.finos.legend.depot.domain.artifacts.repository.ArtifactType;
 import org.finos.legend.depot.store.model.projects.StoreProjectData;
 import org.finos.legend.depot.store.model.projects.StoreProjectVersionData;
-import org.finos.legend.depot.store.notifications.api.NotificationEventHandler;
-import org.finos.legend.depot.store.notifications.queue.api.Queue;
+import org.finos.legend.depot.services.api.notifications.queue.Queue;
 import org.finos.legend.depot.services.api.artifacts.handlers.ProjectArtifactHandlerFactory;
 import org.finos.legend.depot.services.api.artifacts.handlers.ProjectArtifactsHandler;
 import org.finos.legend.depot.core.services.tracing.TracerFactory;
@@ -63,7 +62,7 @@ import java.util.jar.Manifest;
 import java.util.stream.Collectors;
 
 
-public final class ProjectVersionRefreshHandler implements NotificationEventHandler
+public final class ProjectVersionRefreshHandler implements NotificationHandler
 {
     private static final Logger LOGGER = org.slf4j.LoggerFactory.getLogger(ProjectVersionRefreshHandler.class);
     public static final String VERSION_REFRESH_COUNTER = "versionRefresh";
@@ -111,9 +110,9 @@ public final class ProjectVersionRefreshHandler implements NotificationEventHand
     }
 
     @Override
-    public MetadataEventResponse handleEvent(MetadataNotification versionEvent)
+    public MetadataNotificationResponse handleNotification(MetadataNotification versionEvent)
     {
-        MetadataEventResponse response = new MetadataEventResponse();
+        MetadataNotificationResponse response = new MetadataNotificationResponse();
         Optional<StoreProjectData> existingProject = projects.findCoordinates(versionEvent.getGroupId(), versionEvent.getArtifactId());
         if (!existingProject.isPresent())
         {
@@ -127,7 +126,7 @@ public final class ProjectVersionRefreshHandler implements NotificationEventHand
     }
 
     @Override
-    public List<String> validateEvent(MetadataNotification event)
+    public List<String> validate(MetadataNotification event)
     {
         List<String> errors = new ArrayList<>();
 
@@ -170,9 +169,9 @@ public final class ProjectVersionRefreshHandler implements NotificationEventHand
         return found.get();
     }
 
-    private MetadataEventResponse validateGAV(String groupId, String artifactId, String versionId)
+    private MetadataNotificationResponse validateGAV(String groupId, String artifactId, String versionId)
     {
-        MetadataEventResponse response = new MetadataEventResponse();
+        MetadataNotificationResponse response = new MetadataNotificationResponse();
         if (!projects.findCoordinates(groupId, artifactId).isPresent())
         {
             String missingProject = String.format("No Project with coordinates %s-%s found", groupId, artifactId);
@@ -200,7 +199,7 @@ public final class ProjectVersionRefreshHandler implements NotificationEventHand
         return response;
     }
 
-    public MetadataEventResponse executeWithTrace(String label, MetadataNotification notification, Supplier<MetadataEventResponse> functionToExecute)
+    public MetadataNotificationResponse executeWithTrace(String label, MetadataNotification notification, Supplier<MetadataNotificationResponse> functionToExecute)
     {
         return TracerFactory.get().executeWithTrace(label, () ->
                 functionToExecute.get(),decorateSpanWithVersionInfo(notification.getGroupId(), notification.getArtifactId(), notification.getVersionId()));
@@ -215,10 +214,10 @@ public final class ProjectVersionRefreshHandler implements NotificationEventHand
         return tags;
     }
 
-    MetadataEventResponse doRefresh(MetadataNotification event)
+    MetadataNotificationResponse doRefresh(MetadataNotification event)
     {
             long refreshStartTime = System.currentTimeMillis();
-            MetadataEventResponse response = new MetadataEventResponse();
+            MetadataNotificationResponse response = new MetadataNotificationResponse();
             String message = String.format("Executing: [%s-%s-%s], eventId: [%s], parentEventId: [%s], full/transitive: [%s/%s], attempts: [%s]", event.getGroupId(), event.getArtifactId(),
                     event.getVersionId(), event.getEventId(), event.getParentEventId(), event.isFullUpdate(), event.isTransitive(), event.getAttempt());
             response.addMessage(message);
@@ -236,12 +235,13 @@ public final class ProjectVersionRefreshHandler implements NotificationEventHand
                 {
                     LOGGER.info("Processing artifacts for [{}-{}-{}]", event.getGroupId(), event.getArtifactId(), event.getVersionId());
 
-                    ParallelIterate.forEach(ProjectArtifactHandlerFactory.getSupportedTypes(), artifactType -> response.combine(handleArtifacts(artifactType, project, event.getVersionId(), event.isFullUpdate())));
+                    ProjectArtifactHandlerFactory.getSupportedTypes().forEach(artifactType -> response.combine(handleArtifacts(artifactType, project, event.getVersionId(), event.isFullUpdate())));
                     LOGGER.info("Finished processing artifacts for [{}-{}-{}]", event.getGroupId(), event.getArtifactId(), event.getVersionId());
                     if (!response.hasErrors())
                     {
 
                         updateProjectVersionData(project, event.getVersionId(), newDependencies);
+                        updateProjectData(project, event.getVersionId());
                         //we let the version load but will check dependencies exists and report missing dependencies as errors
                         if (!event.isTransitive())
                         {
@@ -304,6 +304,14 @@ public final class ProjectVersionRefreshHandler implements NotificationEventHand
         LOGGER.info("Finished updating project data [{}-{}-{}]", project.getGroupId(), project.getArtifactId(), versionId);
     }
 
+    private void updateProjectData(StoreProjectData projectData, String versionId)
+    {
+        if (projectData.evaluateLatestVersionAndUpdate(versionId))
+        {
+            projects.createOrUpdate(projectData);
+        }
+    }
+
     private String queueWorkToRefreshProjectVersion(StoreProjectData projectData, String versionId, boolean fullUpdate, boolean transitive, String parentEvent)
     {
         return String.format("queued: [%s-%s-%s], parentEventId :[%s], full/transitive :[%s/%s],event id :[%s] ",
@@ -349,12 +357,12 @@ public final class ProjectVersionRefreshHandler implements NotificationEventHand
             });
         }
 
-        return manifestProperties;
+        return manifestProperties.isEmpty() ? null : manifestProperties;
     }
 
-    private MetadataEventResponse handleDependencies(StoreProjectData projectData, String versionId, List<ProjectVersion> dependencies, boolean fullUpdate, boolean transitive, String parentEventId)
+    private MetadataNotificationResponse handleDependencies(StoreProjectData projectData, String versionId, List<ProjectVersion> dependencies, boolean fullUpdate, boolean transitive, String parentEventId)
     {
-        MetadataEventResponse response = new MetadataEventResponse();
+        MetadataNotificationResponse response = new MetadataNotificationResponse();
         dependencies.stream().forEach(dependency ->
         {
             Optional<StoreProjectData> dependent = projects.findCoordinates(dependency.getGroupId(), dependency.getArtifactId());
@@ -383,9 +391,9 @@ public final class ProjectVersionRefreshHandler implements NotificationEventHand
         return response;
     }
 
-    private MetadataEventResponse handleArtifacts(ArtifactType artifactType, StoreProjectData project, String versionId, boolean fullUpdate)
+    private MetadataNotificationResponse handleArtifacts(ArtifactType artifactType, StoreProjectData project, String versionId, boolean fullUpdate)
     {
-        MetadataEventResponse response = new MetadataEventResponse();
+        MetadataNotificationResponse response = new MetadataNotificationResponse();
         ProjectArtifactsHandler refreshHandler = ProjectArtifactHandlerFactory.getArtifactHandler(artifactType);
         if (refreshHandler != null)
         {

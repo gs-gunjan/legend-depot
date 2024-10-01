@@ -15,6 +15,7 @@
 package org.finos.legend.depot.services.artifacts.refresh;
 
 import org.finos.legend.depot.domain.project.ProjectVersion;
+import org.finos.legend.depot.domain.project.dependencies.VersionDependencyReport;
 import org.finos.legend.depot.services.api.artifacts.refresh.RefreshDependenciesService;
 import org.finos.legend.depot.services.api.projects.ManageProjectsService;
 import org.finos.legend.depot.services.dependencies.DependencyUtil;
@@ -27,10 +28,10 @@ import org.finos.legend.depot.services.api.metrics.query.QueryMetricsRegistry;
 import org.finos.legend.depot.store.model.projects.StoreProjectData;
 import org.finos.legend.depot.store.model.projects.StoreProjectVersionData;
 import org.finos.legend.depot.store.mongo.CoreDataMongoStoreTests;
+import org.finos.legend.depot.store.mongo.notifications.queue.NotificationsQueueMongo;
 import org.finos.legend.depot.store.mongo.projects.ProjectsMongo;
 import org.finos.legend.depot.store.mongo.projects.ProjectsVersionsMongo;
-import org.finos.legend.depot.store.notifications.queue.api.Queue;
-import org.finos.legend.depot.store.notifications.queue.store.mongo.NotificationsQueueMongo;
+import org.finos.legend.depot.services.api.notifications.queue.Queue;
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
@@ -208,5 +209,48 @@ public class TestRefreshDependenciesService extends CoreDataMongoStoreTests
         project4 = refreshDependenciesService.updateTransitiveDependencies(GROUPID, "test-master", "3.0.0");
         Assert.assertTrue(project4.getTransitiveDependenciesReport().isValid());
         Assert.assertEquals(Arrays.asList(dependency3, dependency4, dependency1), project4.getTransitiveDependenciesReport().getTransitiveDependencies());
+    }
+
+    @Test
+    public void canOverrideDependencies4()
+    {
+        // B -> CV1 , Cv1-> DV1
+        // E -> CV2, Cv2 -> DV1
+        // override Cv2
+        StoreProjectVersionData projectB = new StoreProjectVersionData("examples.metadata", "testb", "1.0.0");
+        StoreProjectVersionData projectCv1 = new StoreProjectVersionData("examples.metadata", "testc", "1.0.0");
+        StoreProjectVersionData projectDv1 = new StoreProjectVersionData("examples.metadata", "testd", "1.0.0");
+        ProjectVersion dependency1 = new ProjectVersion("examples.metadata", "testc", "1.0.0");
+        ProjectVersion dependency2 = new ProjectVersion("examples.metadata", "testd", "1.0.0");
+        projectB.setTransitiveDependenciesReport(new VersionDependencyReport(Arrays.asList(dependency1, dependency2), true));
+        projectB.getVersionData().setDependencies(Arrays.asList(dependency1));
+        projectCv1.setTransitiveDependenciesReport(new VersionDependencyReport(Arrays.asList(dependency2), true));
+        projectCv1.getVersionData().setDependencies(Arrays.asList(dependency2));
+
+        StoreProjectVersionData projectE = new StoreProjectVersionData("examples.metadata", "teste", "1.0.0");
+        StoreProjectVersionData projectCv2 = new StoreProjectVersionData("examples.metadata","testc", "2.0.0");
+        ProjectVersion dependency3 = new ProjectVersion("examples.metadata", "testc", "2.0.0");
+        projectE.setTransitiveDependenciesReport(new VersionDependencyReport(Arrays.asList(dependency3, dependency2), true));
+        projectE.getVersionData().setDependencies(Arrays.asList(dependency3));
+        projectCv2.setTransitiveDependenciesReport(new VersionDependencyReport(Arrays.asList(dependency2), true));
+        projectCv2.getVersionData().setDependencies(Arrays.asList(dependency2));
+
+        projectsService.createOrUpdate(projectCv1);
+        projectsService.createOrUpdate(projectB);
+        projectsService.createOrUpdate(projectDv1);
+        projectsService.createOrUpdate(projectCv2);
+        projectsService.createOrUpdate(projectE);
+
+        ProjectVersion pv1 = new ProjectVersion("examples.metadata", "testb", "1.0.0");
+        ProjectVersion pv2 = new ProjectVersion("examples.metadata", "teste", "1.0.0");
+
+        StoreProjectVersionData project = new StoreProjectVersionData("examples.metadata", "testa", "1.0.0");
+        project.getVersionData().setDependencies(Arrays.asList(dependency3, pv1, pv2));
+
+        projectsService.createOrUpdate(project);
+        project = refreshDependenciesService.updateTransitiveDependencies("examples.metadata", "testa", "1.0.0");
+
+        Assert.assertEquals(4, project.getTransitiveDependenciesReport().getTransitiveDependencies().size());
+        Assert.assertEquals(Arrays.asList(dependency2, pv2, dependency3, pv1), project.getTransitiveDependenciesReport().getTransitiveDependencies());
     }
 }

@@ -18,6 +18,7 @@ package org.finos.legend.depot.services.entities;
 import org.eclipse.collections.api.list.MutableList;
 import org.eclipse.collections.impl.list.mutable.FastList;
 import org.eclipse.collections.impl.parallel.ParallelIterate;
+import org.finos.legend.depot.core.services.metrics.PrometheusMetricsFactory;
 import org.finos.legend.depot.domain.entity.ProjectVersionEntities;
 import org.finos.legend.depot.store.model.entities.StoredEntity;
 import org.finos.legend.depot.domain.project.ProjectVersion;
@@ -39,8 +40,9 @@ import java.util.stream.Collectors;
 public class EntitiesServiceImpl<T extends StoredEntity> implements EntitiesService<T>
 {
     private static final Logger LOGGER = org.slf4j.LoggerFactory.getLogger(EntitiesServiceImpl.class);
-    public static final String CALCULATE_PROJECT_DEPENDENCIES = "calculateProjectDependencies";
-    public static final String RETRIEVE_DEPENDENCY_ENTITIES = "retrieveDependencyEntities";
+    private static final String CALCULATE_PROJECT_DEPENDENCIES = "calculateProjectDependencies";
+    private static final String RETRIEVE_DEPENDENCY_ENTITIES = "retrieveDependencyEntities";
+    private static final String DEPENDENCIES_SIZE = "dependencies";
     private final Entities entities;
     protected final ProjectsService projects;
 
@@ -60,10 +62,29 @@ public class EntitiesServiceImpl<T extends StoredEntity> implements EntitiesServ
     }
 
     @Override
+    public List<Entity> getEntitiesByClassifier(String groupId, String artifactId, String versionId, String classifier)
+    {
+        String version = this.projects.resolveAliasesAndCheckVersionExists(groupId, artifactId, versionId);
+        return entities.findEntitiesByClassifier(groupId, artifactId, version, classifier);
+    }
+
+    @Override
     public Optional<Entity> getEntity(String groupId, String artifactId, String versionId, String entityPath)
     {
         String version = this.projects.resolveAliasesAndCheckVersionExists(groupId, artifactId, versionId);
         return entities.getEntity(groupId, artifactId, version, entityPath);
+    }
+
+    @Override
+    public List<Entity> getEntityFromDependencies(String groupId, String artifactId, String versionId, List<String> entityPaths, boolean includeOrigin)
+    {
+        String version = this.projects.resolveAliasesAndCheckVersionExists(groupId, artifactId, versionId);
+        Set<ProjectVersion> projectVersions = projects.getDependencies(groupId, artifactId, version, true);
+        if (includeOrigin)
+        {
+            projectVersions.add(new ProjectVersion(groupId, artifactId, version));
+        }
+        return entities.getEntityFromDependencies(projectVersions, entityPaths);
     }
 
     @Override
@@ -73,8 +94,7 @@ public class EntitiesServiceImpl<T extends StoredEntity> implements EntitiesServ
         return entities.getEntitiesByPackage(groupId, artifactId, version, packageName, classifierPaths, includeSubPackages);
     }
 
-    @Override
-    public List<ProjectVersionEntities> getDependenciesEntities(List<ProjectVersion> projectDependencies, boolean transitive, boolean includeOrigin)
+    public List<ProjectVersionEntities> getDependenciesEntities(List<ProjectVersion> projectDependencies, String classifier, boolean transitive, boolean includeOrigin)
     {
         Set<ProjectVersion> dependencies = (Set<ProjectVersion>) executeWithTrace(CALCULATE_PROJECT_DEPENDENCIES, () ->
         {
@@ -86,7 +106,9 @@ public class EntitiesServiceImpl<T extends StoredEntity> implements EntitiesServ
             return deps;
         });
         TracerFactory.get().log(String.format("dependencies: [%s] ",dependencies.size()));
+        PrometheusMetricsFactory.getInstance().observeHistogram(DEPENDENCIES_SIZE,dependencies.size());
         LOGGER.info("finished calculating [{}] dependencies",dependencies.size());
+
         return  (List<ProjectVersionEntities>) executeWithTrace(RETRIEVE_DEPENDENCY_ENTITIES, () ->
         {
             MutableList<ProjectVersionEntities> depEntities = FastList.newList();
@@ -94,7 +116,15 @@ public class EntitiesServiceImpl<T extends StoredEntity> implements EntitiesServ
             ParallelIterate.forEach(dependencies, dep ->
             {
                 String version = this.projects.resolveAliasesAndCheckVersionExists(dep.getGroupId(), dep.getArtifactId(), dep.getVersionId());
-                List<Entity> deps = (List<Entity>) entities.getAllEntities(dep.getGroupId(), dep.getArtifactId(), version).stream().collect(Collectors.toList());
+                List<Entity> deps;
+                if (classifier != null)
+                {
+                    deps = (List<Entity>) entities.findEntitiesByClassifier(dep.getGroupId(), dep.getArtifactId(), version, classifier).stream().collect(Collectors.toList());
+                }
+                else
+                {
+                    deps = (List<Entity>) entities.getAllEntities(dep.getGroupId(), dep.getArtifactId(), version).stream().collect(Collectors.toList());
+                }
                 depEntities.add(new ProjectVersionEntities(dep.getGroupId(), dep.getArtifactId(), version, deps));
                 totalEntities.addAndGet(deps.size());
                 TracerFactory.get().log(String.format("Total [%s-%s-%s]: [%s] entities",dep.getGroupId(), dep.getArtifactId(), dep.getVersionId(),deps.size()));
@@ -102,6 +132,18 @@ public class EntitiesServiceImpl<T extends StoredEntity> implements EntitiesServ
             TracerFactory.get().log(String.format("Total [%s]: [%s] entities",depEntities.size(),totalEntities));
             return depEntities;
         });
+    }
+
+    @Override
+    public List<ProjectVersionEntities> getDependenciesEntities(List<ProjectVersion> projectDependencies, boolean transitive, boolean includeOrigin)
+    {
+        return getDependenciesEntities(projectDependencies, null, transitive, includeOrigin);
+    }
+
+    @Override
+    public List<ProjectVersionEntities> getDependenciesEntitiesByClassifier(List<ProjectVersion> projectDependencies, String classifier, boolean transitive, boolean includeOrigin)
+    {
+        return getDependenciesEntities(projectDependencies, classifier, transitive, includeOrigin);
     }
 
     private Object executeWithTrace(String label, Supplier<Object> functionToExecute)

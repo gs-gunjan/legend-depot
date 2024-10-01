@@ -38,7 +38,6 @@ public class TracingResource
 
     public TracingResource()
     {
-        PrometheusMetricsFactory.getInstance().registerResourceSummaries(this);
     }
 
     private Logger getLogger()
@@ -125,6 +124,16 @@ public class TracingResource
         return responseBuilder.build();
     }
 
+    protected <T> Response handleResponse(String label, Supplier<T> supplier)
+    {
+        return handleResponse(label, label, supplier);
+    }
+
+    protected <T> Response handleResponse(String resourceAPIMetricName,String label, Supplier<T> supplier)
+    {
+        return handle(resourceAPIMetricName, label, supplier, null, () -> null);
+    }
+
     protected <T> T handle(String label, Supplier<T> supplier)
     {
         return handle(label, label, supplier);
@@ -133,10 +142,5 @@ public class TracingResource
     protected <T> Response handle(String label, Supplier<T> supplier, Request request, Supplier<String> entityTagSupplier)
     {
         return handle(label, label, supplier, request, entityTagSupplier);
-    }
-
-    void registerResourceApisMetrics(TracingResource baseResource)
-    {
-
     }
 }

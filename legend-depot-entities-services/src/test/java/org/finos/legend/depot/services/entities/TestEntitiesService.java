@@ -15,24 +15,28 @@
 
 package org.finos.legend.depot.services.entities;
 
-import org.eclipse.collections.api.tuple.Pair;
-import org.eclipse.collections.impl.tuple.Tuples;
-import org.finos.legend.depot.store.api.entities.UpdateEntities;
-import org.finos.legend.depot.store.model.entities.EntityDefinition;
+import org.eclipse.collections.api.factory.Lists;
+import org.finos.legend.depot.domain.entity.DepotEntity;
 import org.finos.legend.depot.domain.entity.ProjectVersionEntities;
-import org.finos.legend.depot.store.model.entities.StoredEntityData;
-import org.finos.legend.depot.store.model.entities.StoredEntityStringData;
-import org.finos.legend.depot.store.model.projects.StoreProjectVersionData;
 import org.finos.legend.depot.domain.project.ProjectVersion;
 import org.finos.legend.depot.domain.project.dependencies.VersionDependencyReport;
+import org.finos.legend.depot.domain.version.Scope;
 import org.finos.legend.depot.services.TestBaseServices;
+import org.finos.legend.depot.services.api.entities.EntityClassifierService;
 import org.finos.legend.depot.services.api.entities.ManageEntitiesService;
-import org.finos.legend.depot.services.projects.ProjectsServiceImpl;
 import org.finos.legend.depot.services.api.metrics.query.QueryMetricsRegistry;
+import org.finos.legend.depot.services.api.notifications.queue.Queue;
+import org.finos.legend.depot.services.api.projects.ManageProjectsService;
 import org.finos.legend.depot.services.api.projects.configuration.ProjectsConfiguration;
+import org.finos.legend.depot.services.projects.ManageProjectsServiceImpl;
+import org.finos.legend.depot.store.api.entities.UpdateEntities;
+import org.finos.legend.depot.store.model.entities.EntityDefinition;
+import org.finos.legend.depot.store.model.entities.StoredEntityData;
+import org.finos.legend.depot.store.model.entities.StoredEntityStringData;
+import org.finos.legend.depot.store.model.projects.StoreProjectData;
+import org.finos.legend.depot.store.model.projects.StoreProjectVersionData;
 import org.finos.legend.depot.store.mongo.entities.EntitiesMongo;
 import org.finos.legend.depot.store.mongo.entities.test.EntitiesMongoTestUtils;
-import org.finos.legend.depot.store.notifications.queue.api.Queue;
 import org.finos.legend.sdlc.domain.model.entity.Entity;
 import org.junit.Assert;
 import org.junit.Before;
@@ -40,21 +44,23 @@ import org.junit.Test;
 
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.HashMap;
 import java.util.function.Predicate;
 
-import static org.mockito.Mockito.mock;
 import static org.finos.legend.depot.domain.version.VersionValidator.BRANCH_SNAPSHOT;
+import static org.mockito.Mockito.mock;
 
 public class TestEntitiesService extends TestBaseServices
 {
     private final QueryMetricsRegistry metrics = mock(QueryMetricsRegistry.class);
     private final Queue queue = mock(Queue.class);
     private  EntitiesMongoTestUtils entityUtils = new EntitiesMongoTestUtils(mongoProvider);
+    private ManageProjectsService projectsService = new ManageProjectsServiceImpl(projectsVersionsStore, projectsStore, metrics, queue, new ProjectsConfiguration("master"));
     protected UpdateEntities entitiesStore = new EntitiesMongo(mongoProvider);
-    protected ManageEntitiesService entitiesService = new ManageEntitiesServiceImpl(entitiesStore, new ProjectsServiceImpl(projectsVersionsStore, projectsStore, metrics, queue, new ProjectsConfiguration("master")));
+    protected ManageEntitiesService entitiesService = new ManageEntitiesServiceImpl(entitiesStore, projectsService);
+    protected EntityClassifierService classifierService = new EntityClassifierServiceImpl(projectsService, entitiesStore);
 
     @Before
     public void setUpData()
@@ -133,17 +139,6 @@ public class TestEntitiesService extends TestBaseServices
 
     }
 
-    @Test
-    public void canGetOrphanedEntities()
-    {
-        entitiesService.createOrUpdate("example.one", "orphaned", "1.0.0", Arrays.asList(new EntityDefinition("path::entity", "la", null)));
-        entitiesService.createOrUpdate("example.two", "orphaned", "1.0.1", Arrays.asList(new EntityDefinition("path::lala", "la", null)));
-
-        List<Pair<String, String>> orphaned = entitiesService.getOrphanedStoredEntities();
-        Assert.assertEquals(2, orphaned.size());
-        Assert.assertTrue(orphaned.contains(Tuples.pair("example.one", "orphaned")));
-        Assert.assertTrue(orphaned.contains(Tuples.pair("example.two", "orphaned")));
-    }
 
     @Test
     public void canQueryEntitiesWithVersionInPackage()
@@ -164,13 +159,16 @@ public class TestEntitiesService extends TestBaseServices
     @Test
     public void canQueryEntitiesWithLatestVersionAlias()
     {
+        //validation on project id , can't bypass PROD-D
+        projectsStore.createOrUpdate(new StoreProjectData("PROD-1","examples.metadata","test1",null, "1.0.0"));
         projectsVersionsStore.createOrUpdate(new StoreProjectVersionData("examples.metadata","test1","1.0.0"));
+        // latest is derived from project data
         entityUtils.loadEntities("PROD-D", "1.0.0");
 
         String pkgName = "examples::metadata::test::dependency::v1_2_3";
 
         Assert.assertEquals(2, entitiesService.getEntities("examples.metadata","test1","latest").size());
-        Assert.assertEquals(2, entitiesService.getEntitiesByPackage("examples.metadata","test1","latest",pkgName, Collections.EMPTY_SET,true).size());
+        Assert.assertEquals(2, entitiesService.getEntitiesByPackage("examples.metadata","test1","latest", pkgName, Collections.EMPTY_SET,true).size());
 
     }
 
@@ -222,7 +220,6 @@ public class TestEntitiesService extends TestBaseServices
 
     }
 
-
     @Test
     public void canSerializeEntityDefinitionWithNulls()
     {
@@ -237,5 +234,59 @@ public class TestEntitiesService extends TestBaseServices
         // check entities serialization and deserialization
         Entity entity = (Entity) entitiesService.getEntities("examples.metadata", "test", "5.0.0").get(0);
         Assert.assertEquals(content, entity.getContent());
+    }
+
+    @Test
+    public void canGetClassifiers()
+    {
+        List<DepotEntity> entities = classifierService.getEntitiesByClassifierPath("meta::pure::metamodel::type::Class", null, null, Scope.RELEASES, true);
+        Assert.assertEquals(entities.size(), 3);
+    }
+
+    @Test
+    public void canGetEntitiesForProjectAndVersionByClassifier()
+    {
+        projectsVersionsStore.createOrUpdate(new StoreProjectVersionData("example.services.test","test","2.0.2"));
+        entityUtils.loadEntities("PROD-C", "2.0.2");
+        List<Entity> entity = entitiesService.getEntitiesByClassifier("example.services.test", "test", "2.0.2", "meta::pure::metamodel::function::ConcreteFunctionDefinition");
+        Assert.assertNotNull(entity);
+        Assert.assertEquals(1, entity.size());
+    }
+
+    @Test
+    public void canGetDependencyEntitiesForProjectAndVersionByClassifier()
+    {
+        StoreProjectVersionData project = new StoreProjectVersionData("examples.metadata", "test-dependencies", "1.0.1");
+        ProjectVersion pv = new ProjectVersion("example.services.test", "test", "2.0.2");
+        project.getVersionData().addDependency(pv);
+        projectsVersionsStore.createOrUpdate(project);
+        projectsVersionsStore.createOrUpdate(new StoreProjectVersionData("example.services.test","test","2.0.2"));
+        entityUtils.loadEntities("PROD-B", "1.0.1");
+        entityUtils.loadEntities("PROD-C", "2.0.2");
+        List<Entity> entity = entitiesService.getDependenciesEntitiesByClassifier("examples.metadata", "test-dependencies", "1.0.1", "meta::pure::metamodel::function::ConcreteFunctionDefinition", true, true);
+        Assert.assertNotNull(entity);
+        Assert.assertEquals(2, entity.size());
+
+        List<Entity> entity1 = entitiesService.getDependenciesEntitiesByClassifier("examples.metadata", "test-dependencies", "1.0.1", "meta::pure::metamodel::function::ConcreteFunctionDefinition", true, false);
+        Assert.assertNotNull(entity1);
+        Assert.assertEquals(1, entity1.size());
+    }
+
+    @Test
+    public void canGetEntityFromDependencies()
+    {
+        List<Entity> entity = entitiesService.getEntityFromDependencies("examples.metadata", "test", "2.3.1", Lists.fixedSize.of("domain::covid::JHUCovid19","examples::metadata::test::dependency::Dependency"), false);
+        Assert.assertEquals(entity.size(), 2);
+
+        entity = entitiesService.getEntityFromDependencies("examples.metadata", "test", "2.3.1", Lists.fixedSize.of("examples::metadata::test::dependency::Dependency","com::MyGenerationSpecification"), true);
+        Assert.assertEquals(entity.size(), 2);
+
+        entity = entitiesService.getEntityFromDependencies("examples.metadata", "test", "2.3.1", Lists.fixedSize.of("examples::metadata::test::dependency::Dependency","covid::JHUCovid19"), false);
+        Assert.assertEquals(entity.size(), 1);
+
+        entity = entitiesService.getEntityFromDependencies("examples.metadata", "test", "2.3.1", Lists.fixedSize.of("com::MyGenerationSpecification","covid::JHUCovid19"), false);
+        Assert.assertEquals(entity.size(), 0);
+
+        Assert.assertThrows("project version not found for examples.metadata-test-3.0.1", IllegalArgumentException.class, () -> entitiesService.getEntityFromDependencies("examples.metadata", "test", "3.0.1", Lists.fixedSize.of("covid::JHUCovid19"), false));
     }
 }

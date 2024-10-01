@@ -18,6 +18,7 @@ package org.finos.legend.depot.core.services.tracing;
 public class ResourceLoggingAndTracing
 {
     public static final String GET_ALL_PROJECTS = "get all projects";
+    public static final String GET_VERSIONS_BY_LASTUPDATE_DATE = "get versions by lastupdate date";
     public static final String GET_PROJECT_CONFIG_BY_GA = "get project configuration by ga";
     public static final String FIND_PROJECT_VERSIONS = "find project versions";
     public static final String GET_PROJECT_VERSION_BY_GAV = "get project version by gav";
@@ -32,7 +33,9 @@ public class ResourceLoggingAndTracing
     public static final String GET_VERSION_DEPENDENCY_ENTITIES = "get version dependencies entities";
     public static final String GET_VERSIONS_DEPENDENCY_ENTITIES = "get versions dependencies entities";
     public static final String GET_VERSION_ENTITIES_AS_PMCD = "get version entities as PMCD";
+    public static final String GET_VERSIONS_DEPENDENCY_ENTITIES_AS_PMCD = "get versions dependencies entities as PMCD";
     public static final String GET_VERSION_ENTITY = "get version entity";
+    public static final String GET_VERSION_ENTITY_FROM_DEPENDENCIES = "get version entity from dependencies";
     public static final String GET_VERSION_ENTITIES_BY_FILTER = "get version entities by filter";
     public static final String GET_VERSIONS = "get versions";
     public static final String UPDATE_ALL_VERSIONS = "refresh all versions";
@@ -54,13 +57,11 @@ public class ResourceLoggingAndTracing
     public static final String FIND_PAST_EVENTS = "find past events";
     public static final String ENQUEUE_EVENT = "queue event";
     public static final String HANDLE_EVENTS_IN_QUEUE = "handle queue events";
-    public static final String STORE_STATUS = "get store status";
     public static final String SCHEDULES_STATUS = "get schedule status";
     public static final String SCHEDULES_RUNS = "get schedule runs";
     public static final String TRIGGER_SCHEDULE = "trigger schedule";
     public static final String TOGGLE_SCHEDULE = "toggle schedule";
     public static final String TOGGLE_SCHEDULES = "toggle schedules";
-    public static final String ORPHAN_STORE_ENTITIES = "get orphaned entities";
     public static final String GET_ENTITIES_BY_CLASSIFIER_PATH = "get entities by classifier path";
     public static final String REPOSITORY_PROJECT_VERSIONS = "repo project versions";
     public static final String GET_PROJECT_CACHE_MISMATCHES = "version mismatch";

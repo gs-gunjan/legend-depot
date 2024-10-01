@@ -48,7 +48,7 @@ public class VoidPrometheusMetricsHandler implements PrometheusMetricsHandler
     }
 
     @Override
-    public void registerResourceSummaries(TracingResource baseResource)
+    public void registerResourceSummaries(Class<? extends TracingResource> baseResource)
     {
     }
 
@@ -95,6 +95,12 @@ public class VoidPrometheusMetricsHandler implements PrometheusMetricsHandler
 
     @Override
     public void observeHistogram(String name, long start, long end, String... labelValues)
+    {
+
+    }
+
+    @Override
+    public void observeHistogram(String name, double amount)
     {
 
     }

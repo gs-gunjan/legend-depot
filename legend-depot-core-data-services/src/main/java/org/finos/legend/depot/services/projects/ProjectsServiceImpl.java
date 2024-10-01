@@ -16,15 +16,15 @@
 package org.finos.legend.depot.services.projects;
 
 import org.eclipse.collections.api.factory.Sets;
-import org.finos.legend.depot.domain.notifications.EventPriority;
 import org.finos.legend.depot.domain.notifications.MetadataNotification;
+import org.finos.legend.depot.domain.notifications.Priority;
 import org.finos.legend.depot.domain.project.ProjectVersionData;
 import org.finos.legend.depot.services.api.dependencies.DependencyOverride;
 import org.finos.legend.depot.store.model.projects.StoreProjectData;
 import org.finos.legend.depot.store.model.projects.StoreProjectVersionData;
 import org.finos.legend.depot.domain.project.ProjectVersion;
 import org.finos.legend.depot.domain.project.dependencies.ProjectDependencyGraph;
-import org.finos.legend.depot.domain.project.dependencies.ProjectDependencyGraphWalkerContext;
+import org.finos.legend.depot.services.dependencies.ProjectDependencyGraphWalkerContext;
 import org.finos.legend.depot.domain.project.dependencies.ProjectDependencyReport;
 import org.finos.legend.depot.domain.project.dependencies.ProjectDependencyVersionNode;
 import org.finos.legend.depot.domain.project.dependencies.ProjectDependencyWithPlatformVersions;
@@ -38,8 +38,7 @@ import org.finos.legend.depot.store.api.projects.ProjectsVersions;
 import org.finos.legend.depot.store.api.projects.UpdateProjectsVersions;
 import org.finos.legend.depot.store.api.projects.UpdateProjects;
 import org.finos.legend.depot.services.api.metrics.query.QueryMetricsRegistry;
-import org.finos.legend.depot.store.notifications.queue.api.Queue;
-import org.finos.legend.sdlc.domain.model.version.VersionId;
+import org.finos.legend.depot.services.api.notifications.queue.Queue;
 
 import javax.inject.Inject;
 import javax.inject.Named;
@@ -49,7 +48,6 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.HashSet;
 import java.util.Map;
-import java.util.ArrayList;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -102,12 +100,6 @@ public class ProjectsServiceImpl implements ProjectsService
     }
 
     @Override
-    public List<StoreProjectData> getProjects(int page, int pageSize)
-    {
-        return projects.getProjects(page, pageSize);
-    }
-
-    @Override
     public List<String> getVersions(String groupId, String artifactId,boolean includeSnapshots)
     {
         return this.find(groupId, artifactId).stream().filter(pv -> (includeSnapshots || !VersionValidator.isSnapshotVersion(pv.getVersionId())) && !pv.getVersionData().isExcluded()).map(pv -> pv.getVersionId()).collect(Collectors.toList());
@@ -117,6 +109,12 @@ public class ProjectsServiceImpl implements ProjectsService
     public List<StoreProjectData> findByProjectId(String projectId)
     {
         return projects.findByProjectId(projectId);
+    }
+
+    @Override
+    public List<StoreProjectVersionData> findByUpdatedDate(long updatedFrom, long updatedTo)
+    {
+        return projectsVersions.findByUpdatedDate(updatedFrom, updatedTo);
     }
 
     @Override
@@ -154,7 +152,12 @@ public class ProjectsServiceImpl implements ProjectsService
     {
         if (VersionAlias.LATEST.getName().equals(versionId))
         {
-            return projectsVersions.find(groupId, artifactId).stream().filter(v -> !VersionValidator.isSnapshotVersion(v.getVersionId()) && !v.getVersionData().isExcluded()).max(Comparator.comparing(o -> VersionId.parseVersionId(o.getVersionId())));
+            Optional<StoreProjectData> projectData = this.findCoordinates(groupId, artifactId);
+            if (projectData.isPresent() && projectData.get().getLatestVersion() != null)
+            {
+                return projectsVersions.find(groupId, artifactId, projectData.get().getLatestVersion());
+            }
+            return Optional.empty();
         }
         else if (VersionAlias.HEAD.getName().equals(versionId))
         {
@@ -174,7 +177,7 @@ public class ProjectsServiceImpl implements ProjectsService
     private void restoreEvictedProjectVersion(String groupId, String artifactId, String versionId)
     {
         StoreProjectData projectData = this.findCoordinates(groupId, artifactId).get();
-        this.queue.push(new MetadataNotification(projectData.getProjectId(), groupId, artifactId, versionId,true, false, null, EventPriority.HIGH));
+        this.queue.push(new MetadataNotification(projectData.getProjectId(), groupId, artifactId, versionId,true, false, null, Priority.HIGH));
     }
 
     @Override
@@ -211,12 +214,6 @@ public class ProjectsServiceImpl implements ProjectsService
         {
             throw new IllegalArgumentException(String.format("No project found for %s-%s",groupId,artifactId));
         }
-    }
-
-    @Override
-    public Optional<VersionId> getLatestVersion(String groupId, String artifactId)
-    {
-        return this.getVersions(groupId, artifactId,false).stream().map(v -> VersionId.parseVersionId(v)).max(VersionId::compareTo);
     }
 
     @Override
@@ -270,33 +267,25 @@ public class ProjectsServiceImpl implements ProjectsService
         ProjectDependencyGraphWalkerContext  graphWalkerContext =  new ProjectDependencyGraphWalkerContext();
         buildDependencyGraph(graph, null, projectDependencyVersions, graphWalkerContext);
         buildProjectVersionMap(projectDependencyVersions, graphWalkerContext);
-        ProjectDependencyReport report = buildReportFromGraph(graph, graphWalkerContext);
-        return overrideConflictDependencies(projectDependencyVersions, report);
-    }
-
-    public ProjectDependencyReport overrideConflictDependencies(List<ProjectVersion> projectDependencyVersions, ProjectDependencyReport report)
-    {
-        List<ProjectDependencyReport.ProjectDependencyConflict> conflicts = new ArrayList<>(report.getConflicts());
-        projectDependencyVersions.stream().forEach(dep ->
-        {
-            Optional<ProjectDependencyReport.ProjectDependencyConflict> conflictPresent = conflicts.stream().filter(conflict -> conflict.getGroupId().equals(dep.getGroupId()) && conflict.getArtifactId().equals(dep.getArtifactId())).findFirst();
-            if (conflictPresent.isPresent())
-            {
-                report.removeConflict(conflictPresent.get());
-            }
-        });
-        return report;
+        return buildReportFromGraph(graph, graphWalkerContext);
     }
 
     private void buildProjectVersionMap(List<ProjectVersion> projectDependencyVersions, ProjectDependencyGraphWalkerContext graphWalkerContext)
     {
+        Set<ProjectVersion> dependencies = new HashSet<>();
         projectDependencyVersions.forEach(pv ->
         {
             StoreProjectVersionData versionData = graphWalkerContext.getProjectData(pv.getGroupId(), pv.getArtifactId(), pv.getVersionId());
-            versionData.getTransitiveDependenciesReport().getTransitiveDependencies().stream()
-                    .filter(dep -> !projectDependencyVersions.stream().filter(x -> x.getGroupId().equals(dep.getGroupId()) && x.getArtifactId().equals(dep.getArtifactId())).findFirst().isPresent())
-                    .forEach(dep -> graphWalkerContext.addVersionToProject(dep.getGroupId(), dep.getArtifactId(), dep));
+                if (versionData.getTransitiveDependenciesReport().isValid())
+                {
+                    dependencies.addAll(this.dependencyOverride.overrideWith(versionData.getTransitiveDependenciesReport().getTransitiveDependencies(), projectDependencyVersions, graphWalkerContext::getProjectDataDependencies));
+                }
+                else
+                {
+                    throw new IllegalStateException(String.format("Error calculating transitive dependencies for project version - %s-%s-%s", versionData.getGroupId(), versionData.getArtifactId(), versionData.getVersionId()));
+                }
         });
+        dependencies.forEach(dep -> graphWalkerContext.addVersionToProject(dep.getGroupId(), dep.getArtifactId(), dep));
     }
 
     public ProjectDependencyReport buildReportFromGraph(ProjectDependencyGraph dependencyGraph, ProjectDependencyGraphWalkerContext graphWalkerContext)

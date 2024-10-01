@@ -31,10 +31,7 @@ public interface ProjectsService
 {
     List<StoreProjectData> getAllProjectCoordinates();
 
-    /**
-     * NOTE: page starting from 1
-     */
-    List<StoreProjectData> getProjects(int page, int pageSize);
+    List<StoreProjectVersionData> findByUpdatedDate(long updatedFrom, long updatedTo);
 
     default List<String> getVersions(String groupId, String artifactId)
     {
@@ -42,8 +39,6 @@ public interface ProjectsService
     }
 
     List<String> getVersions(String groupId, String artifactId,boolean includeSnapshots);
-
-    Optional<VersionId> getLatestVersion(String groupId, String artifactId);
 
     @Deprecated
     List<StoreProjectData> findByProjectId(String projectId);

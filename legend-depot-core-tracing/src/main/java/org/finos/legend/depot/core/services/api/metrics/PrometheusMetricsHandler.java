@@ -33,6 +33,8 @@ public interface PrometheusMetricsHandler
 
     void observeHistogram(String name, long start, long end);
 
+    void observeHistogram(String name, double amount);
+
     void registerCounter(String counter, String helpMessage);
 
     void incrementCount(String counter);
@@ -49,5 +51,5 @@ public interface PrometheusMetricsHandler
 
     void increaseGauge(String name, int value);
 
-    void registerResourceSummaries(TracingResource baseResource);
+    void registerResourceSummaries(Class<? extends TracingResource> baseResource);
 }

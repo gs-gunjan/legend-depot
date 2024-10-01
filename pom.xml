@@ -5,7 +5,7 @@
   ~  you may not use this file except in compliance with the License.
   ~  You may obtain a copy of the License at
   ~
-  ~       http://www.apache.org/licenses/LICENSE-2.0
+  ~     http://www.apache.org/licenses/LICENSE-2.0
   ~
   ~  Unless required by applicable law or agreed to in writing, software
   ~  distributed under the License is distributed on an "AS IS" BASIS,
@@ -27,7 +27,7 @@
     <name>Legend Depot</name>
     <groupId>org.finos.legend.depot</groupId>
     <artifactId>legend-depot</artifactId>
-    <version>2.10.1-SNAPSHOT</version>
+    <version>2.43.1-SNAPSHOT</version>
     <packaging>pom</packaging>
 
     <modules>
@@ -50,8 +50,10 @@
         <module>legend-depot-metrics-query-services</module>
         <module>legend-depot-metrics-query-store-mongo</module>
 
-        <module>legend-depot-store-notifications</module>
-        <module>legend-depot-store-notifications-queue</module>
+        <module>legend-depot-notifications-api</module>
+        <module>legend-depot-notifications-services</module>
+        <module>legend-depot-notifications-store-mongo</module>
+        <module>legend-depot-notifications-queue-mongo</module>
 
         <module>legend-depot-core-data-api</module>
         <module>legend-depot-core-data-services</module>
@@ -93,12 +95,13 @@
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
         <maven.build.timestamp.format>yyyy-MM-dd HH:mm</maven.build.timestamp.format>
-        <maven.compiler>1.8</maven.compiler>
+        <maven.compiler>11</maven.compiler>
+        <java.version.range>[11,12),[17,18)</java.version.range>
 
         <!-- Legend dependency versions -->
-        <legend.shared.version>0.24.1</legend.shared.version>
-        <legend.engine.version>4.29.0</legend.engine.version>
-        <legend.sdlc.version>0.145.0</legend.sdlc.version>
+        <legend.shared.version>0.25.6</legend.shared.version>
+        <legend.engine.version>4.58.0</legend.engine.version>
+        <legend.sdlc.version>0.174.0</legend.sdlc.version>
 
 
         <!-- Dependency versions -->
@@ -277,7 +280,7 @@
                             <configuration>
                                 <rules>
                                     <requireJavaVersion>
-                                        <version>[11,12)</version>
+                                        <version>${java.version.range}</version>
                                     </requireJavaVersion>
                                     <dependencyConvergence />
                                     <bannedDependencies>
@@ -546,12 +549,23 @@
             </dependency>
             <dependency>
                 <groupId>org.finos.legend.depot</groupId>
-                <artifactId>legend-depot-store-notifications</artifactId>
+                <artifactId>legend-depot-notifications-api</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <dependency>
                 <groupId>org.finos.legend.depot</groupId>
-                <artifactId>legend-depot-store-notifications-queue</artifactId>
+                <artifactId>legend-depot-notifications-services</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.finos.legend.depot</groupId>
+                <artifactId>legend-depot-notifications-store-mongo</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+
+            <dependency>
+                <groupId>org.finos.legend.depot</groupId>
+                <artifactId>legend-depot-notifications-queue-mongo</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <dependency>
@@ -713,21 +727,6 @@
                 <groupId>org.finos.legend.shared</groupId>
                 <artifactId>legend-shared-opentracing-base</artifactId>
                 <version>${legend.shared.version}</version>
-            </dependency>
-            <dependency>
-                <groupId>org.finos.legend.shared</groupId>
-                <artifactId>legend-shared-opentracing-jersey</artifactId>
-                <version>${legend.shared.version}</version>
-                <exclusions>
-                    <exclusion>
-                        <groupId>javax.servlet</groupId>
-                        <artifactId>javax.servlet-api</artifactId>
-                    </exclusion>
-                    <exclusion>
-                        <groupId>org.glassfish.jersey.core</groupId>
-                        <artifactId>jersey-client</artifactId>
-                    </exclusion>
-                </exclusions>
             </dependency>
             <dependency>
                 <groupId>org.finos.legend.shared</groupId>
@@ -948,6 +947,11 @@
             <dependency>
                 <groupId>org.slf4j</groupId>
                 <artifactId>slf4j-api</artifactId>
+                <version>${slf4j.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.slf4j</groupId>
+                <artifactId>jul-to-slf4j</artifactId>
                 <version>${slf4j.version}</version>
             </dependency>
             <!-- LOGGING-->
@@ -1251,6 +1255,11 @@
                 <groupId>io.zipkin.zipkin2</groupId>
                 <artifactId>zipkin</artifactId>
                 <version>${zipkin.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>io.zipkin.reporter2</groupId>
+                <artifactId>zipkin-sender-okhttp3</artifactId>
+                <version>${zipkin-reporter.version}</version>
             </dependency>
             <dependency>
                 <groupId>io.opentracing</groupId>

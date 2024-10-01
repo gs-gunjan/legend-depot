@@ -23,7 +23,7 @@ import org.finos.legend.depot.services.api.artifacts.repository.ArtifactReposito
 import org.finos.legend.depot.domain.artifacts.repository.ArtifactType;
 import org.finos.legend.depot.domain.version.VersionMismatch;
 import org.finos.legend.depot.domain.DatesHandler;
-import org.finos.legend.depot.domain.api.MetadataEventResponse;
+import org.finos.legend.depot.domain.notifications.MetadataNotificationResponse;
 import org.finos.legend.depot.store.model.projects.StoreProjectData;
 import org.finos.legend.depot.store.model.projects.StoreProjectVersionData;
 import org.finos.legend.depot.services.api.entities.ManageEntitiesService;
@@ -51,7 +51,7 @@ import org.finos.legend.depot.store.mongo.entities.test.EntitiesMongoTestUtils;
 import org.finos.legend.depot.store.mongo.generations.FileGenerationsMongo;
 import org.finos.legend.depot.store.mongo.projects.ProjectsMongo;
 import org.finos.legend.depot.store.mongo.projects.ProjectsVersionsMongo;
-import org.finos.legend.depot.store.notifications.queue.api.Queue;
+import org.finos.legend.depot.services.api.notifications.queue.Queue;
 import org.finos.legend.depot.store.mongo.generations.TestGenerationsStoreMongo;
 import org.junit.Assert;
 import org.junit.Before;
@@ -95,7 +95,7 @@ public class TestArtifactsPurgeService extends TestBaseServices
     public void setUpData()
     {
         ProjectArtifactHandlerFactory.registerArtifactHandler(ArtifactType.ENTITIES, new EntitiesHandlerImpl(entitiesService, mock(EntityProvider.class)));
-        ProjectArtifactHandlerFactory.registerArtifactHandler(ArtifactType.FILE_GENERATIONS, new FileGenerationHandlerImpl(mock(ArtifactRepository.class), mock(FileGenerationsProvider.class), new ManageFileGenerationsServiceImpl(fileGenerationsStore, entitiesStore, projectsService)));
+        ProjectArtifactHandlerFactory.registerArtifactHandler(ArtifactType.FILE_GENERATIONS, new FileGenerationHandlerImpl(mock(ArtifactRepository.class), mock(FileGenerationsProvider.class), new ManageFileGenerationsServiceImpl(fileGenerationsStore, projectsService)));
 
         setUpProjectsFromFile(TestArtifactsPurgeService.class.getClassLoader().getResource("data/projects.json"));
         setUpProjectsVersionsFromFile(TestArtifactsPurgeService.class.getClassLoader().getResource("data/projectsVersions.json"));
@@ -115,7 +115,7 @@ public class TestArtifactsPurgeService extends TestBaseServices
         List<String> projectVersions = projectsService.getVersions(TEST_GROUP_ID, TEST_ARTIFACT_ID);
         Assert.assertEquals(3, projectVersions.size());
         Assert.assertEquals("2.0.0", projectVersions.get(0));
-        Assert.assertEquals("2.3.0", projectsService.getLatestVersion(TEST_GROUP_ID, TEST_ARTIFACT_ID).get().toVersionIdString());
+        Assert.assertEquals("2.3.0", project.getLatestVersion());
 
         Assert.assertEquals(2, entitiesStore.getAllEntities(TEST_GROUP_ID, TEST_ARTIFACT_ID, "2.0.0").size());
         purgeService.evictOldestProjectVersions(TEST_GROUP_ID,TEST_ARTIFACT_ID,1);
@@ -138,7 +138,7 @@ public class TestArtifactsPurgeService extends TestBaseServices
         Assert.assertNotNull(project);
         List<String> projectVersions = projectsService.getVersions(TEST_GROUP_ID, TEST_ARTIFACT_ID);
         Assert.assertEquals(3, projectVersions.size());
-        MetadataEventResponse response = purgeService.evictOldestProjectVersions(TEST_GROUP_ID,TEST_ARTIFACT_ID,5);
+        MetadataNotificationResponse response = purgeService.evictOldestProjectVersions(TEST_GROUP_ID,TEST_ARTIFACT_ID,5);
         Assert.assertNotNull(response);
 
         List<String> afterVersionsOrdered = projectsService.getVersions(TEST_GROUP_ID, TEST_ARTIFACT_ID);
@@ -161,7 +161,7 @@ public class TestArtifactsPurgeService extends TestBaseServices
         Assert.assertEquals(0, projectVersions.size());
         Assert.assertEquals(1, entitiesStore.getAllEntities(TEST_GROUP_ID, "test1", BRANCH_SNAPSHOT("master")).size());
 
-        MetadataEventResponse response = purgeService.evictOldestProjectVersions(TEST_GROUP_ID,"test1",1);
+        MetadataNotificationResponse response = purgeService.evictOldestProjectVersions(TEST_GROUP_ID,"test1",1);
         Assert.assertNotNull(response);
 
         List<String> afterVersionsOrdered = projectsService.getVersions(TEST_GROUP_ID, "test1");

@@ -33,10 +33,9 @@ public class StoreProjectVersionData extends VersionedData implements HasIdentif
     @JsonProperty
     private boolean evicted = false;
     @JsonProperty
-    private Date creationDate;
-    //TODO: understand how to populate last updated
+    private Date created;
     @JsonProperty
-    private Date lastUpdated;
+    private Date updated;
     @JsonProperty
     private ProjectVersionData versionData = new ProjectVersionData();
     @JsonProperty
@@ -50,7 +49,7 @@ public class StoreProjectVersionData extends VersionedData implements HasIdentif
     public StoreProjectVersionData(String groupId, String artifactId,String versionId)
     {
         super(groupId, artifactId, versionId);
-        setCreationDate(new Date());
+        setCreated(new Date());
     }
 
     public StoreProjectVersionData(String groupId,String artifactId,String versionId,boolean evicted,ProjectVersionData versionData)
@@ -58,27 +57,17 @@ public class StoreProjectVersionData extends VersionedData implements HasIdentif
         super(groupId, artifactId, versionId);
         this.evicted = evicted;
         this.versionData = versionData;
-        setCreationDate(new Date());
+        setCreated(new Date());
     }
 
-    public Date getCreationDate()
+    public Date getCreated()
     {
-        return creationDate;
+        return created;
     }
 
-    public void setCreationDate(Date creationDate)
+    public void setCreated(Date created)
     {
-        this.creationDate = creationDate;
-    }
-
-    public Date getLastUpdated()
-    {
-        return lastUpdated;
-    }
-
-    public void setLastUpdated(Date lastUpdated)
-    {
-        this.lastUpdated = lastUpdated;
+        this.created = created;
     }
 
     public boolean isEvicted()
@@ -109,6 +98,16 @@ public class StoreProjectVersionData extends VersionedData implements HasIdentif
     public void setTransitiveDependenciesReport(VersionDependencyReport transitiveDependenciesReport)
     {
         this.transitiveDependenciesReport = transitiveDependenciesReport;
+    }
+
+    public void setUpdated(Date updated)
+    {
+        this.updated = updated;
+    }
+
+    public Date getUpdated()
+    {
+        return updated;
     }
 
     @Override

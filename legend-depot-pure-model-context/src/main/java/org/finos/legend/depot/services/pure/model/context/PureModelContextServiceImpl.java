@@ -15,10 +15,12 @@
 
 package org.finos.legend.depot.services.pure.model.context;
 
+import org.finos.legend.depot.core.services.tracing.TracerFactory;
 import org.finos.legend.depot.domain.entity.ProjectVersionEntities;
-import org.finos.legend.depot.services.api.pure.model.context.PureModelContextService;
+import org.finos.legend.depot.domain.project.ProjectVersion;
 import org.finos.legend.depot.services.api.entities.EntitiesService;
 import org.finos.legend.depot.services.api.projects.ProjectsService;
+import org.finos.legend.depot.services.api.pure.model.context.PureModelContextService;
 import org.finos.legend.engine.protocol.pure.PureClientVersions;
 import org.finos.legend.engine.protocol.pure.v1.model.context.AlloySDLC;
 import org.finos.legend.engine.protocol.pure.v1.model.context.PureModelContextData;
@@ -26,16 +28,18 @@ import org.finos.legend.sdlc.domain.model.entity.Entity;
 import org.finos.legend.sdlc.protocol.pure.v1.PureModelContextDataBuilder;
 
 import javax.inject.Inject;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
-import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import static org.finos.legend.engine.protocol.pure.v1.model.context.PureModelContextData.newBuilder;
 
 public class PureModelContextServiceImpl implements PureModelContextService
 {
-    public static final String PURE = "pure";
+    private static final String PURE = "pure";
+    private static final String CALCULATE_COMBINED_PMCD = "calculate combined PMCD";
+    private static final String GA_SEPARATOR = ":";
+    private static final TracerFactory tracer = TracerFactory.get();
     private final EntitiesService entitiesService;
     private final ProjectsService projectsService;
 
@@ -49,68 +53,70 @@ public class PureModelContextServiceImpl implements PureModelContextService
     @Override
     public PureModelContextData getPureModelContextData(String groupId, String artifactId, String versionId, String clientVersion, boolean transitive)
     {
-        validateClientVersion(clientVersion);
+        String resolvedClientVersion = resolveAndValidateClientVersion(clientVersion);
         String version = this.projectsService.resolveAliasesAndCheckVersionExists(groupId, artifactId, versionId);
+
         List<Entity> entities = this.entitiesService.getEntities(groupId, artifactId, version);
-        PureModelContextData pureModelContextData = getPureModelContextData(entities, groupId, artifactId, version, clientVersion);
+
+        PureModelContextData pureModelContextData = buildPureModelContextData(entities.stream(), groupId, artifactId, version, resolvedClientVersion);
         if (!transitive)
         {
             return pureModelContextData;
         }
-        else
+
+        List<ProjectVersionEntities> dependenciesEntities = this.entitiesService.getDependenciesEntities(groupId, artifactId, version, true, false);
+        return tracer.executeWithTrace(CALCULATE_COMBINED_PMCD, () ->
         {
-            List<ProjectVersionEntities> dependenciesEntities = this.entitiesService.getDependenciesEntities(groupId, artifactId, version, transitive, true);
-
-            List<PureModelContextData> allPMCD = new ArrayList<>();
-            for (ProjectVersionEntities projectVersionEntities : dependenciesEntities)
-            {
-                allPMCD.add(getPureModelContextData(projectVersionEntities.getEntities().stream().collect(Collectors.toList()),
-                        projectVersionEntities.getGroupId(),
-                        projectVersionEntities.getArtifactId(),
-                        projectVersionEntities.getVersionId(),
-                        clientVersion));
-            }
-            return combinePureModelContextData(pureModelContextData,allPMCD);
-        }
+            PureModelContextData dependenciesPMCD = buildPureModelContextData(dependenciesEntities.stream().flatMap(dep -> dep.getEntities().stream()),groupId,artifactId,version,resolvedClientVersion);
+            return combinePureModelContextData(pureModelContextData,dependenciesPMCD);
+        });
     }
 
-    private PureModelContextData getPureModelContextData(List<Entity> entities, String groupId, String artifactId, String versionId, String clientVersion)
+    @Override
+    public PureModelContextData getPureModelContextData(List<ProjectVersion> projectDependencies, String clientVersion, boolean transitive)
     {
-        return PureModelContextDataBuilder
-                .newBuilder()
-                .withProtocol(PURE, clientVersion == null ? PureClientVersions.production : clientVersion)
-                .withSDLC(getAlloySDLC(groupId, artifactId, versionId))
-                .withEntities(entities)
-                .build();
+        String resolvedClientVersion = resolveAndValidateClientVersion(clientVersion);
+        List<ProjectVersionEntities> dependenciesEntities = (List<ProjectVersionEntities>) entitiesService.getDependenciesEntities(projectDependencies, transitive, true);
+        return buildPureModelContextData(dependenciesEntities.stream().flatMap(dep -> dep.getEntities().stream()), new AlloySDLC(), resolvedClientVersion);
     }
 
-    private void validateClientVersion(String clientVersion)
+    protected String resolveAndValidateClientVersion(String clientVersion)
     {
         if (clientVersion != null && !PureClientVersions.versions.contains(clientVersion))
         {
             throw new IllegalArgumentException(String.format("Client version provided is invalid, following are the valid client versions: %s", String.join(", ", PureClientVersions.versions)));
         }
+        return clientVersion == null ? PureClientVersions.production : clientVersion;
     }
 
-    private AlloySDLC getAlloySDLC(String groupId, String artifactId, String versionId)
+    protected PureModelContextData buildPureModelContextData(Stream<Entity> entities, String groupId, String artifactId, String versionId, String clientVersion)
+    {
+        return buildPureModelContextData(entities, buildAlloySDLC(groupId, artifactId, versionId), clientVersion);
+    }
+
+    protected PureModelContextData buildPureModelContextData(Stream<Entity> entities, AlloySDLC alloySDLC, String clientVersion)
+    {
+        return PureModelContextDataBuilder
+                .newBuilder()
+                .withProtocol(PURE, clientVersion)
+                .withSDLC(alloySDLC)
+                .withEntitiesIfPossible(entities)
+                .build();
+    }
+
+    protected PureModelContextData combinePureModelContextData(PureModelContextData rootPMCD, PureModelContextData childPMCD)
+    {
+        PureModelContextData.Builder builder = newBuilder().withPureModelContextData(rootPMCD);
+        Objects.requireNonNull(childPMCD);
+        builder.addPureModelContextData(childPMCD);
+        return builder.distinct().sorted().build();
+    }
+
+    protected AlloySDLC buildAlloySDLC(String groupId, String artifactId, String versionId)
     {
         AlloySDLC sdlc = new AlloySDLC();
-        sdlc.project = groupId + ":" + artifactId;
+        sdlc.project = String.join(GA_SEPARATOR,groupId,artifactId);
         sdlc.baseVersion = versionId;
         return sdlc;
-    }
-
-    private PureModelContextData combinePureModelContextData(PureModelContextData pureModelContextData, List<PureModelContextData> dataList)
-    {
-        PureModelContextData.Builder builder = newBuilder().withPureModelContextData(pureModelContextData);
-        if (dataList != null)
-        {
-            dataList.forEach(data ->
-            {
-                Objects.requireNonNull(data);
-                builder.addPureModelContextData(data);
-            });
-        }
-        return builder.distinct().sorted().build();
     }
 }

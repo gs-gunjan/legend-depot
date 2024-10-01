@@ -30,8 +30,8 @@ import org.finos.legend.depot.services.TestBaseServices;
 import org.finos.legend.depot.services.api.projects.ManageProjectsService;
 import org.finos.legend.depot.services.api.metrics.query.QueryMetricsRegistry;
 import org.finos.legend.depot.services.api.projects.configuration.ProjectsConfiguration;
-import org.finos.legend.depot.store.notifications.queue.api.Queue;
-import org.finos.legend.depot.store.notifications.queue.store.mongo.NotificationsQueueMongo;
+import org.finos.legend.depot.services.api.notifications.queue.Queue;
+import org.finos.legend.depot.store.mongo.notifications.queue.NotificationsQueueMongo;
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
@@ -281,10 +281,21 @@ public class TestProjectsService extends TestBaseServices
     {
         Optional<StoreProjectData> storeProjectData = projectsService.findCoordinates("examples.metadata", "test");
         Assert.assertTrue(storeProjectData.isPresent());
-        Assert.assertEquals(storeProjectData.get(), new StoreProjectData("PROD-A", "examples.metadata", "test"));
+        Assert.assertEquals(storeProjectData.get(), new StoreProjectData("PROD-A", "examples.metadata", "test", null, "2.3.1"));
 
         Optional<StoreProjectData> storeProjectData1 = projectsService.findCoordinates("dummy.dep", "test");
         Assert.assertFalse(storeProjectData1.isPresent());
+    }
+
+    @Test
+    public void canGetProjectVersionWithLatestVersionNull()
+    {
+        projectsStore.createOrUpdate(new StoreProjectData("PROD-123", "dummy.project", "test"));
+        Optional<StoreProjectData> storeProjectData = projectsService.findCoordinates("dummy.project", "test");
+        Assert.assertTrue(storeProjectData.isPresent());
+
+        Optional<StoreProjectVersionData> projectVersionData = projectsService.find("dummy.project", "test", "latest");
+        Assert.assertFalse(projectVersionData.isPresent());
     }
 
     @Test
@@ -352,11 +363,11 @@ public class TestProjectsService extends TestBaseServices
         Assert.assertNotNull(fullVersions);
         Assert.assertEquals(2, fullVersions.size());
 
-        Assert.assertTrue(projectsService.getLatestVersion("examples.metadata", "test").isPresent());
-        Assert.assertEquals("2.3.1", projectsService.getLatestVersion("examples.metadata", "test").get().toVersionIdString());
+        Assert.assertTrue(projectsService.findCoordinates("examples.metadata", "test").isPresent());
+        Assert.assertEquals("2.3.1", projectsService.findCoordinates("examples.metadata", "test").get().getLatestVersion());
 
         Assert.assertTrue(projectsService.find("examples.metadata", "test","latest").isPresent());
-        Assert.assertEquals("2.3.1", projectsService.getLatestVersion("examples.metadata", "test").get().toVersionIdString());
+        Assert.assertEquals("2.3.1", projectsService.findCoordinates("examples.metadata", "test").get().getLatestVersion());
 
         Assert.assertFalse(projectsService.find("dont","exist","latest").isPresent());
 
@@ -468,6 +479,112 @@ public class TestProjectsService extends TestBaseServices
         List<ProjectVersion> dependencies = projectsService.getDependencies(Arrays.asList(pv1, pv2), true).stream().collect(Collectors.toList());
         Assert.assertEquals(1, dependencies.size());
         Assert.assertEquals(dependency2, dependencies.get(0));
+
+    }
+
+    @Test
+    public void canGenerateReportForOverriddenDependenciesCase1()
+    {
+        // A -> B, B -> CV1 , CV1 -> DV1
+        // E -> CV2, Cv2 -> DV2
+        // override CV2
+
+        StoreProjectData pd1 = new StoreProjectData("PROD-1","examples.metadata", "testb");
+        StoreProjectData pd2 = new StoreProjectData("PROD-2","examples.metadata", "testc");
+        StoreProjectData pd3 = new StoreProjectData("PROD-3","examples.metadata", "testd");
+        StoreProjectData pd4 = new StoreProjectData("PROD-4","examples.metadata", "teste");
+
+        projectsService.createOrUpdate(pd1);
+        projectsService.createOrUpdate(pd2);
+        projectsService.createOrUpdate(pd3);
+        projectsService.createOrUpdate(pd4);
+
+        StoreProjectVersionData projectB = new StoreProjectVersionData("examples.metadata", "testb", "1.0.0");
+        StoreProjectVersionData projectCv1 = new StoreProjectVersionData("examples.metadata", "testc", "1.0.0");
+        StoreProjectVersionData projectDv1 = new StoreProjectVersionData("examples.metadata", "testd", "1.0.0");
+        ProjectVersion dependency1 = new ProjectVersion("examples.metadata", "testc", "1.0.0");
+        ProjectVersion dependency2 = new ProjectVersion("examples.metadata", "testd", "1.0.0");
+        projectB.setTransitiveDependenciesReport(new VersionDependencyReport(Arrays.asList(dependency1, dependency2), true));
+        projectB.getVersionData().setDependencies(Arrays.asList(dependency1));
+        projectCv1.setTransitiveDependenciesReport(new VersionDependencyReport(Arrays.asList(dependency2), true));
+        projectCv1.getVersionData().setDependencies(Arrays.asList(dependency2));
+
+        StoreProjectVersionData projectE = new StoreProjectVersionData("examples.metadata", "teste", "1.0.0");
+        StoreProjectVersionData projectCv2 = new StoreProjectVersionData("examples.metadata","testc", "2.0.0");
+        StoreProjectVersionData projectDv2 = new StoreProjectVersionData("examples.metadata","testd","2.0.0");
+        ProjectVersion dependency3 = new ProjectVersion("examples.metadata", "testc", "2.0.0");
+        ProjectVersion dependency4 = new ProjectVersion("examples.metadata", "testd", "2.0.0");
+        projectE.setTransitiveDependenciesReport(new VersionDependencyReport(Arrays.asList(dependency3, dependency4), true));
+        projectE.getVersionData().setDependencies(Arrays.asList(dependency3));
+        projectCv2.setTransitiveDependenciesReport(new VersionDependencyReport(Arrays.asList(dependency4), true));
+        projectCv2.getVersionData().setDependencies(Arrays.asList(dependency4));
+
+        projectsService.createOrUpdate(projectCv1);
+        projectsService.createOrUpdate(projectB);
+        projectsService.createOrUpdate(projectDv1);
+        projectsService.createOrUpdate(projectCv2);
+        projectsService.createOrUpdate(projectE);
+        projectsService.createOrUpdate(projectDv2);
+
+        ProjectVersion pv1 = new ProjectVersion("examples.metadata", "testb", "1.0.0");
+        ProjectVersion pv2 = new ProjectVersion("examples.metadata", "teste", "1.0.0");
+
+        // Cv1 will be overridden by CV2 and incoming dependency Dv2 will override Dv1
+        ProjectDependencyReport dependencyReport = projectsService.getProjectDependencyReport(Arrays.asList(pv1, pv2, dependency3));
+
+        Assert.assertEquals(0, dependencyReport.getConflicts().size());
+    }
+
+    @Test
+    public void canGenerateReportForOverriddenDependenciesCase2()
+    {
+        // A -> B, B -> CV1 , A -> DV1
+        // E -> CV2, Cv2 -> DV2
+        // override CV2
+
+        StoreProjectData pd1 = new StoreProjectData("PROD-1","examples.metadata", "testb");
+        StoreProjectData pd2 = new StoreProjectData("PROD-2","examples.metadata", "testc");
+        StoreProjectData pd3 = new StoreProjectData("PROD-3","examples.metadata", "testd");
+        StoreProjectData pd4 = new StoreProjectData("PROD-4","examples.metadata", "teste");
+
+        projectsService.createOrUpdate(pd1);
+        projectsService.createOrUpdate(pd2);
+        projectsService.createOrUpdate(pd3);
+        projectsService.createOrUpdate(pd4);
+
+        StoreProjectVersionData projectB = new StoreProjectVersionData("examples.metadata", "testb", "1.0.0");
+        StoreProjectVersionData projectCv1 = new StoreProjectVersionData("examples.metadata", "testc", "1.0.0");
+        StoreProjectVersionData projectDv1 = new StoreProjectVersionData("examples.metadata", "testd", "1.0.0");
+        ProjectVersion dependency1 = new ProjectVersion("examples.metadata", "testc", "1.0.0");
+        ProjectVersion dependency2 = new ProjectVersion("examples.metadata", "testd", "1.0.0");
+        projectB.setTransitiveDependenciesReport(new VersionDependencyReport(Arrays.asList(dependency1, dependency2), true));
+        projectB.getVersionData().setDependencies(Arrays.asList(dependency1, dependency2));
+
+        StoreProjectVersionData projectE = new StoreProjectVersionData("examples.metadata", "teste", "1.0.0");
+        StoreProjectVersionData projectCv2 = new StoreProjectVersionData("examples.metadata","testc", "2.0.0");
+        StoreProjectVersionData projectDv2 = new StoreProjectVersionData("examples.metadata","testd","2.0.0");
+        ProjectVersion dependency3 = new ProjectVersion("examples.metadata", "testc", "2.0.0");
+        ProjectVersion dependency4 = new ProjectVersion("examples.metadata", "testd", "2.0.0");
+        projectE.setTransitiveDependenciesReport(new VersionDependencyReport(Arrays.asList(dependency3, dependency4), true));
+        projectE.getVersionData().setDependencies(Arrays.asList(dependency3));
+        projectCv2.setTransitiveDependenciesReport(new VersionDependencyReport(Arrays.asList(dependency4), true));
+        projectCv2.getVersionData().setDependencies(Arrays.asList(dependency4));
+
+        projectsService.createOrUpdate(projectCv1);
+        projectsService.createOrUpdate(projectB);
+        projectsService.createOrUpdate(projectDv1);
+        projectsService.createOrUpdate(projectCv2);
+        projectsService.createOrUpdate(projectE);
+        projectsService.createOrUpdate(projectDv2);
+
+        ProjectVersion pv1 = new ProjectVersion("examples.metadata", "testb", "1.0.0");
+        ProjectVersion pv2 = new ProjectVersion("examples.metadata", "teste", "1.0.0");
+
+        // Cv1 will be overridden by CV2 and incoming dependency Dv2 will be part of the list
+        ProjectDependencyReport dependencyReport = projectsService.getProjectDependencyReport(Arrays.asList(pv1, pv2, dependency3));
+
+        Assert.assertEquals(1, dependencyReport.getConflicts().size());
+        Assert.assertEquals(Sets.mutable.of("examples.metadata:testd:2.0.0", "examples.metadata:testd:1.0.0"),dependencyReport.getConflicts().get(0).getVersions());
 
     }
 }
